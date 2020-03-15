@@ -12,7 +12,7 @@ library(shiny)
 library(tidyverse)
 library(lubridate)
 
-app_version <- 0.02
+app_version <- 0.03
 last_app_version <- 0
 
 if (file.exists("last_download.rds")) {
@@ -32,6 +32,7 @@ if (!file.exists("last_download.rds") ||
         recovered = 'time_series_19-covid-Recovered.csv'
     ) %>% 
         map_dfr(~read_csv(file.path(url_path, .x)), .id = "type")
+    
     cv19 <- data %>%
         pivot_longer(
             cols = -(type:Long),
@@ -53,13 +54,26 @@ if (!file.exists("last_download.rds") ||
         mutate(days_post_100 = (min(date) %--% date) / ddays(1) +
                    log(min(value[type == "confirmed" & value >= 100]) / 100) / log(4 / 3) - 1)# Correction for values above 100
     
+    timing_table <- post_100 %>% 
+        group_by(country) %>% 
+        group_modify(~tibble(
+            model = list(glm(value ~ days_post_100, family = gaussian("log"), data = filter(.x, type == "confirmed"))),
+            cases = max(.x$value),
+            deaths = max(.x$value[.x$type == "deaths"]),
+            date_of_100 = min(.x$date) + ddays(1),
+            slope = exp(model[[1]]$coefficients[2])
+        ))
+        
+    
     last_download <- max(cv19$date)
     saveRDS(last_download, "last_download.rds")
     saveRDS(app_version, "last_app_version.rds")
     saveRDS(cv19, "cv19.rds")
     saveRDS(post_100, "post_100.rds")
+    saveRDS(timing_table, "timing_table.rds")
 } else {
     post_100 <- readRDS("post_100.rds")
+    timing_table <- readRDS("timing_table.rds")
 }
 
 country_choices <- post_100 %>% 
@@ -169,13 +183,15 @@ server <- function(input, output) {
     })
     
     output$timing_table <- renderTable({
-        if (!is.null(vals$post_100_f)) {
-            vals$post_100_f %>% 
-                group_by(country) %>% 
-                summarise(
-                    `Total cases` = as.integer(max(value)),
-                    `Deaths` = as.integer(max(value[type == "deaths"])),
-                    `Date reached 100` = format(min(date) + ddays(1), "%y-%m-%d")
+        if (!is.null(input$countries)) {
+            timing_table %>% 
+                filter(country %in% input$countries) %>% 
+                transmute(
+                    Country = country,
+                    `Total cases` = as.integer(cases),
+                    `Deaths` = as.integer(deaths),
+                    `Date reached 100` = format(date_of_100, "%Y-%m-%d"),
+                    `Daily increase` = sprintf("%0.1f%%", 100 * (slope - 1))
                     )
         }
     })
