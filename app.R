@@ -65,7 +65,9 @@ if (!file.exists("last_download.rds") ||
 country_choices <- post_100 %>% 
     filter(type == "confirmed") %>% 
     group_by(country) %>% 
-    summarise(label = sprintf("%s (%d)", country[1], max(value))) %>% 
+    summarise(
+        label = sprintf("%s (%d)", country[1], max(value))
+    ) %>% 
     ungroup() %>% 
     arrange(country)
 
@@ -78,8 +80,8 @@ ui <- fluidPage(
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
-            div(strong("Last updated: "), textOutput("last_updated", inline = TRUE)),
-            div(strong("Countries to include:")),
+            div(strong("Most recent data: "), textOutput("last_updated", inline = TRUE)),
+            div(strong("Countries to include")," (cases):"),
             div(
                 style = "column-count: 2;",
                 checkboxGroupInput(
@@ -89,17 +91,34 @@ ui <- fluidPage(
                     choiceValues = country_choices$country,
                     selected = "United Kingdom"
                 )
-            )
+            ),
         ),
         
         # Show a plot of the generated distribution
         mainPanel(
+            div("Dashed line indicates 33% daily increase"),
             h3("Confirmed cases"),
             plotOutput("cv19_plot"),
             h3("Deaths"),
             plotOutput("death_plot"),
+            h3("Timings"),
+            tableOutput("timing_table")
         )
-    )
+    ),
+    p(
+        "Interactive time series for COVID-19 data. The data are obtained from",
+        a(href = "https://github.com/CSSEGISandData/COVID-19/",
+          "https://github.com/CSSEGISandData/COVID-19/"), ") and are copyright Johns
+                Hopkins University. Further information on the ultimate data sources
+                are available from ",
+        a(href = "https://github.com/CSSEGISandData/COVID-19/blob/master/README.md", "the Johns Hopkins repository")
+    ),
+    p("Countries are only included if there have been more than 100 cases, and
+                the time axis is set to be zero at the date where 100 cases were reached. If there
+                is not a day with exactly 100 cases, the date is adjusted on the assumption
+                of a 33% daily relative increase at that time."
+    ),
+    p("Code for this Shiny app is available from ",a(href = "https://github.com/NikNakk/covid19", "My GitHub"))
 )
 
 # Define server logic required to draw a histogram
@@ -146,6 +165,18 @@ server <- function(input, output) {
                     value = c(1, 1 * (4/3) ^ max(days_post_100))
                 ),
                 linetype = 2)
+        }
+    })
+    
+    output$timing_table <- renderTable({
+        if (!is.null(vals$post_100_f)) {
+            vals$post_100_f %>% 
+                group_by(country) %>% 
+                summarise(
+                    `Total cases` = as.integer(max(value)),
+                    `Deaths` = as.integer(max(value[type == "deaths"])),
+                    `Date reached 100` = format(min(date) + ddays(1), "%y-%m-%d")
+                    )
         }
     })
     
