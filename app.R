@@ -11,13 +11,21 @@ library(shiny)
 
 library(tidyverse)
 library(lubridate)
-url_path <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+app_version <- 0.02
+last_app_version <- 0
 
 if (file.exists("last_download.rds")) {
     last_download <- readRDS("last_download.rds")
+    if (file.exists("last_app_version.rds")) {
+        last_app_version <- readRDS("last_app_version.rds")
+    }
     current_date_time <- now(tzone = "UTC")
 }
-if (!file.exists("last_download.rds") || as.POSIXct(last_download, tz = "UTC") + dhours(51) <= current_date_time) {
+if (!file.exists("last_download.rds") ||
+    as.POSIXct(last_download, tz = "UTC") + dhours(51) <= current_date_time ||
+    last_app_version < app_version) {
+    url_path <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
     data <- c(
         confirmed = 'time_series_19-covid-Confirmed.csv',
         deaths = 'time_series_19-covid-Deaths.csv',
@@ -41,11 +49,13 @@ if (!file.exists("last_download.rds") || as.POSIXct(last_download, tz = "UTC") +
         summarise(value = sum(value)) %>% 
         group_by(country) %>% 
         filter(any(value >= 100)) %>% 
-        filter(date >= min(date[type == "confirmed" & value >= 100])) %>% 
-        mutate(days_post_100 = (min(date) %--% date) / ddays(1))
+        filter(date >= min(date[type == "confirmed" & value >= 100]) - ddays(1)) %>% 
+        mutate(days_post_100 = (min(date) %--% date) / ddays(1) +
+                   log(min(value[type == "confirmed" & value >= 100]) / 100) / log(4 / 3) - 1)# Correction for values above 100
     
     last_download <- max(cv19$date)
     saveRDS(last_download, "last_download.rds")
+    saveRDS(app_version, "last_app_version.rds")
     saveRDS(cv19, "cv19.rds")
     saveRDS(post_100, "post_100.rds")
 } else {
@@ -61,10 +71,10 @@ country_choices <- post_100 %>%
 
 # Define UI for application that draws a histogram
 ui <- fluidPage(
-
+    
     # Application title
     titlePanel("COVID-19 interactive time series"),
-
+    
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
@@ -81,13 +91,13 @@ ui <- fluidPage(
                 )
             )
         ),
-
+        
         # Show a plot of the generated distribution
         mainPanel(
-           h3("Confirmed cases"),
-           plotOutput("cv19_plot"),
-           h3("Deaths"),
-           plotOutput("death_plot"),
+            h3("Confirmed cases"),
+            plotOutput("cv19_plot"),
+            h3("Deaths"),
+            plotOutput("death_plot"),
         )
     )
 )
