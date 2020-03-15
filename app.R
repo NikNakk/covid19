@@ -189,10 +189,10 @@ server <- function(input, output) {
                 transmute(
                     Country = country,
                     `Total cases` = as.integer(cases),
-                    `Deaths` = as.integer(deaths),
                     `Date reached 100` = format(date_of_100, "%Y-%m-%d"),
-                    `Daily increase` = sprintf("%0.1f%%", 100 * (slope - 1))
-                    )
+                    `Daily increase` = sprintf("%0.1f%%", 100 * (slope - 1)),
+                    `Deaths` = as.integer(deaths)
+                )
         }
     })
     
