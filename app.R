@@ -86,7 +86,8 @@ country_choices <- post_100 %>%
     arrange(country)
 
 # Define UI for application that draws a histogram
-ui <- fluidPage(
+ui <- function(request) {
+    fluidPage(
     
     # Application title
     titlePanel("COVID-19 interactive time series"),
@@ -133,10 +134,19 @@ ui <- fluidPage(
                 of a 33% daily relative increase at that time."
     ),
     p("Code for this Shiny app is available from ",a(href = "https://github.com/NikNakk/covid19", "My GitHub"))
-)
+    )}
 
-# Define server logic required to draw a histogram
-server <- function(input, output) {
+
+server <- function(input, output, session) {
+    
+    observe({
+        reactiveValuesToList(input)
+        session$doBookmark()
+    })
+    
+    onBookmarked(function(url) {
+        updateQueryString(url)
+    })
     
     output$last_updated <- renderText(format(last_download, "%Y-%m-%d"))
     
@@ -197,6 +207,5 @@ server <- function(input, output) {
     })
     
 }
-
 # Run the application 
-shinyApp(ui = ui, server = server)
+shinyApp(ui = ui, server = server, enableBookmarking = "url")
