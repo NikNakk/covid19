@@ -31,7 +31,7 @@ if (!file.exists("last_download.rds") ||
         deaths = 'time_series_19-covid-Deaths.csv',
         recovered = 'time_series_19-covid-Recovered.csv'
     ) %>% 
-        map_dfr(~read_csv(file.path(url_path, .x)), .id = "type")
+        map_dfr(~read.csv(file.path(url_path, .x), check.names = FALSE), .id = "type")
     
     cv19 <- data %>%
         pivot_longer(
@@ -58,10 +58,14 @@ if (!file.exists("last_download.rds") ||
         group_by(country) %>% 
         group_modify(~tibble(
             model = list(glm(value ~ days_post_100, family = gaussian("log"), data = filter(.x, type == "confirmed"))),
+            death_model = list(try(glm(value ~ days_post_100, family = gaussian("log"), data = filter(.x, type == "deaths", value >= 10)), silent = TRUE)),
             cases = max(.x$value),
             deaths = max(.x$value[.x$type == "deaths"]),
             date_of_100 = min(.x$date) + ddays(1),
-            slope = exp(model[[1]]$coefficients[2])
+            slope = exp(model[[1]]$coefficients[2]),
+            doubling_rate = log(2) / log(slope),
+            deaths_slope = tryCatch(exp(death_model[[1]]$coefficients[2]), error = function(e) NA_real_),
+            deaths_doubling_rate = log(2) / log(deaths_slope)
         ))
         
     
@@ -105,7 +109,7 @@ ui <- fluidPage(
                     choiceValues = country_choices$country,
                     selected = "United Kingdom"
                 )
-            ),
+            )
         ),
         
         # Show a plot of the generated distribution
@@ -190,8 +194,10 @@ server <- function(input, output) {
                     Country = country,
                     `Total cases` = as.integer(cases),
                     `Date reached 100` = format(date_of_100, "%Y-%m-%d"),
-                    `Daily increase` = sprintf("%0.1f%%", 100 * (slope - 1)),
-                    `Deaths` = as.integer(deaths)
+                    `Daily increase cases` = sprintf("%0.1f%%", 100 * (slope - 1)),
+                    `Doubling time cases (days)` = sprintf("%0.1f", doubling_rate),
+                    `Deaths` = as.integer(deaths),
+                    `Doubling time deaths (days) (once total deaths exceed 10)` = sprintf("%0.1f", deaths_doubling_rate)
                 )
         }
     })
