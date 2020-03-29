@@ -41,25 +41,28 @@ if (!file.exists("last_download.rds") ||
         ) %>% 
         mutate(date = lubridate::mdy(date))
     
-    post_100 <- cv19 %>% 
+    cv19_g <- cv19 %>% 
         filter(
             type %in% c("confirmed", "deaths")
         ) %>% 
         mutate(country = coalesce(`Province/State`, `Country/Region`)) %>% 
         group_by(date, country = `Country/Region`, type) %>% 
-        summarise(value = sum(value)) %>% 
+        summarise(value = sum(value))
+    
+    post_100 <- cv19_g %>% 
         group_by(country) %>% 
         filter(any(value >= 100)) %>% 
         filter(date >= min(date[type == "confirmed" & value >= 100]) - ddays(1)) %>% 
         mutate(days_post_100 = (min(date) %--% date) / ddays(1) +
                    log(min(value[type == "confirmed" & value >= 100]) / 100) / log(4 / 3) - 1)# Correction for values above 100
     
-    timing_table <- post_100 %>% 
+    timing_table <- cv19_g %>% 
+        inner_join(post_100 %>% select(country, days_post_100), by = "country") %>% 
         group_by(country) %>% 
         group_modify(~tibble(
             date_of_100 = min(.x$date) + ddays(1),
             cases = max(.x$value),
-            cases_model = list(lm(log(value) ~ days_post_100, data = filter(.x, type == "confirmed"))),
+            cases_model = list(lm(log(value) ~ days_post_100, data = filter(.x, type == "confirmed", value >= 100))),
             cases_slope = exp(cases_model[[1]]$coefficients[2]),
             cases_doubling_time = log(2) / cases_model[[1]]$coefficients[2],
             deaths = max(.x$value[.x$type == "deaths"]),
@@ -110,7 +113,7 @@ ui <- function(request) {
                     choiceValues = country_choices$country,
                     selected = "United Kingdom"
                 )
-            ),
+            )
         ),
         
         # Show a plot of the generated distribution
