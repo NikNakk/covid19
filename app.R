@@ -12,7 +12,7 @@ library(shiny)
 library(tidyverse)
 library(lubridate)
 
-app_version <- 0.03
+app_version <- 0.04
 last_app_version <- 0
 
 if (file.exists("last_download.rds")) {
@@ -27,9 +27,9 @@ if (!file.exists("last_download.rds") ||
     last_app_version < app_version) {
     url_path <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
     data <- c(
-        confirmed = 'time_series_19-covid-Confirmed.csv',
-        deaths = 'time_series_19-covid-Deaths.csv',
-        recovered = 'time_series_19-covid-Recovered.csv'
+        confirmed = 'time_series_covid19_confirmed_global.csv',
+        deaths = 'time_series_covid19_deaths_global.csv',
+        recovered = 'time_series_covid19_recovered_global.csv'
     ) %>% 
         map_dfr(~read_csv(file.path(url_path, .x)), .id = "type")
     
@@ -57,11 +57,15 @@ if (!file.exists("last_download.rds") ||
     timing_table <- post_100 %>% 
         group_by(country) %>% 
         group_modify(~tibble(
-            model = list(glm(value ~ days_post_100, family = gaussian("log"), data = filter(.x, type == "confirmed"))),
-            cases = max(.x$value),
-            deaths = max(.x$value[.x$type == "deaths"]),
             date_of_100 = min(.x$date) + ddays(1),
-            slope = exp(model[[1]]$coefficients[2])
+            cases = max(.x$value),
+            cases_model = list(lm(log(value) ~ days_post_100, data = filter(.x, type == "confirmed"))),
+            cases_slope = exp(cases_model[[1]]$coefficients[2]),
+            cases_doubling_time = log(2) / cases_model[[1]]$coefficients[2],
+            deaths = max(.x$value[.x$type == "deaths"]),
+            deaths_model = list(tryCatch(lm(log(value) ~ days_post_100, data = filter(.x, type == "deaths", value >= 10)), error = function(e) NA_real_)),
+            deaths_slope = tryCatch(exp(deaths_model[[1]]$coefficients[2]), error = function(e) NA_real_),
+            deaths_doubling_time = tryCatch(log(2) / deaths_model[[1]]$coefficients[2], error = function(e) NA_real_)
         ))
         
     
@@ -117,7 +121,8 @@ ui <- function(request) {
             h3("Deaths"),
             plotOutput("death_plot"),
             h3("Timings"),
-            tableOutput("timing_table")
+            tableOutput("timing_table"),
+            p("Cases model fitted from 100 cases on; death model fitted from 10 deaths on. Both models fitted as linear models with formula of log(value) ~ days.")
         )
     ),
     p(
@@ -200,8 +205,11 @@ server <- function(input, output, session) {
                     Country = country,
                     `Total cases` = as.integer(cases),
                     `Date reached 100` = format(date_of_100, "%Y-%m-%d"),
-                    `Daily increase` = sprintf("%0.1f%%", 100 * (slope - 1)),
-                    `Deaths` = as.integer(deaths)
+                    `Cases: daily increase` = sprintf("%0.1f%%", 100 * (cases_slope - 1)),
+                    `Cases: doubling time (days)` = sprintf("%0.1f", cases_doubling_time),
+                    `Deaths` = as.integer(deaths),
+                    `Deaths: daily increase` = sprintf("%0.1f%%", 100 * (deaths_slope - 1)),
+                    `Deaths: doubling time (days)` = sprintf("%0.1f", deaths_doubling_time),
                 )
         }
     })
