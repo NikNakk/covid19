@@ -12,7 +12,7 @@ library(shiny)
 library(tidyverse)
 library(lubridate)
 
-app_version <- 0.04
+app_version <- 0.05
 last_app_version <- 0
 
 if (file.exists("last_download.rds")) {
@@ -24,7 +24,7 @@ if (file.exists("last_download.rds")) {
 }
 if (!file.exists("last_download.rds") ||
     as.POSIXct(last_download, tz = "UTC") + dhours(51) <= current_date_time ||
-    last_app_version < app_version) {
+    last_app_version != app_version) {
     url_path <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
     data <- c(
         confirmed = 'time_series_covid19_confirmed_global.csv',
@@ -49,18 +49,24 @@ if (!file.exists("last_download.rds") ||
         group_by(date, country = `Country/Region`, type) %>% 
         summarise(value = sum(value))
     
-    post_100 <- cv19_g %>% 
+    post_100_corr <- cv19_g %>% 
         group_by(country) %>% 
         filter(any(value >= 100)) %>% 
         filter(date >= min(date[type == "confirmed" & value >= 100]) - ddays(1)) %>% 
-        mutate(days_post_100 = (min(date) %--% date) / ddays(1) +
+        summarise(correction_for_100 = min(date) - ddays(1) *
                    log(min(value[type == "confirmed" & value >= 100]) / 100) / log(4 / 3) - 1)# Correction for values above 100
     
+    post_100 <- cv19_g %>% 
+        inner_join(post_100_corr %>% select(country, correction_for_100), by = "country") %>% 
+        mutate(days_post_100 = (correction_for_100 %--% date) / ddays(1)) %>% 
+        filter(days_post_100 > -1)
+    
     timing_table <- cv19_g %>% 
-        inner_join(post_100 %>% select(country, days_post_100), by = "country") %>% 
+        inner_join(post_100_corr %>% select(country, correction_for_100), by = "country") %>% 
+        mutate(days_post_100 = (correction_for_100 %--% date) / ddays(1)) %>% 
         group_by(country) %>% 
         group_modify(~tibble(
-            date_of_100 = min(.x$date) + ddays(1),
+            date_of_100 = floor_date(.x$correction_for_100[1], "days"),
             cases = max(.x$value),
             cases_model = list(lm(log(value) ~ days_post_100, data = filter(.x, type == "confirmed", value >= 100))),
             cases_slope = exp(cases_model[[1]]$coefficients[2]),
@@ -69,7 +75,8 @@ if (!file.exists("last_download.rds") ||
             deaths_model = list(tryCatch(lm(log(value) ~ days_post_100, data = filter(.x, type == "deaths", value >= 10)), error = function(e) NA_real_)),
             deaths_slope = tryCatch(exp(deaths_model[[1]]$coefficients[2]), error = function(e) NA_real_),
             deaths_doubling_time = tryCatch(log(2) / deaths_model[[1]]$coefficients[2], error = function(e) NA_real_)
-        ))
+        )) %>% 
+        ungroup()
         
     
     last_download <- max(cv19$date)
@@ -83,11 +90,10 @@ if (!file.exists("last_download.rds") ||
     timing_table <- readRDS("timing_table.rds")
 }
 
-country_choices <- post_100 %>% 
-    filter(type == "confirmed") %>% 
-    group_by(country) %>% 
-    summarise(
-        label = sprintf("%s (%d)", country[1], max(value))
+country_choices <- timing_table %>% 
+    transmute(
+        country,
+        label = sprintf("%s (%d)", country, cases)
     ) %>% 
     ungroup() %>% 
     arrange(country)
